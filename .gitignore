@@ -1,0 +1,15 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Secrets (API keys live in environment variables, never in files)
+.env
+
+# Downloaded test video and big rendered clips
+data/
+results/*.mp4
+
+# Private planning notes
+docs/superpowers/
