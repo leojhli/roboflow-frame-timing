@@ -133,10 +133,11 @@ def grid_configs(n_frames: int = 300, include_model: bool = True,
                     for s in SCHEDULES for f in FILLINGS for c in CONSUMPTIONS]
         configs += [RunConfig(s, "default", "default", processing_mode=m, n_frames=n_frames)
                     for s in SCHEDULES for m in PROCESSING_MODES]
-        # every_frame alone still drops on live sources; WAIT filling is what
-        # actually keeps every frame (see docs/api-notes.md).
-        configs += [RunConfig(s, "WAIT", "default", processing_mode="every_frame", n_frames=n_frames)
-                    for s in SCHEDULES]
+        # The processing modes keep the live default ADAPTIVE_DROP_OLDEST buffer,
+        # which drops frames before the mode ever sees them. With WAIT filling the
+        # mode alone decides what to drop (see docs/api-notes.md).
+        configs += [RunConfig(s, "WAIT", "default", processing_mode=m, n_frames=n_frames)
+                    for s in SCHEDULES for m in ("every_frame", "auto")]
     if include_model:
         configs += [RunConfig(s, "ADAPTIVE_DROP_OLDEST", "EAGER", mode="model", n_frames=n_frames)
                     for s in SCHEDULES]

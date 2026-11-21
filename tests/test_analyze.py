@@ -3,7 +3,8 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from frametiming.analyze import column_label, plot_strategy_grid, plot_timeline, summarize
+from frametiming.analyze import (
+    SLEEP_WORK_MS, check_integrity, column_label, plot_strategy_grid, plot_timeline, summarize)
 from frametiming.run import COLUMNS
 
 T, F = True, False
@@ -69,3 +70,46 @@ def test_column_label_separates_every_frame_variants():
     wait = summarize(make_run([T], run_id="burst|WAIT|default|every_frame|sleep")).iloc[0]
     assert column_label(plain) != column_label(wait)
     assert "WAIT" in column_label(wait)
+
+
+# ---------- data integrity checks ----------
+
+def clean_run(mode="sleep"):
+    # every other frame processed, 50 ms latency: results 66 ms apart, all >= 40 ms work
+    return make_run([T, F] * 5, latencies_ms=[50.0] * 5,
+                    run_id=f"steady|WAIT|EAGER|legacy|{mode}")
+
+
+def test_integrity_clean_run_has_no_problems():
+    assert check_integrity(clean_run()) == []
+
+
+def test_integrity_flags_missing_frame():
+    df = clean_run().drop(index=3)
+    assert any("missing" in p for p in check_integrity(df))
+
+
+def test_integrity_flags_frame_never_emitted():
+    df = clean_run()
+    df.loc[4, "emit_t"] = np.nan
+    assert any("never sent" in p for p in check_integrity(df))
+
+
+def test_integrity_flags_latency_shorter_than_the_work():
+    df = make_run([T, F] * 5, latencies_ms=[50, 50, 10, 50, 50])
+    assert any("faster than" in p for p in check_integrity(df))
+
+
+def test_integrity_flags_results_closer_than_the_work():
+    df = make_run([T, T, F, F], latencies_ms=[50, 50])  # results 33 ms apart < 40 ms of work
+    assert any("apart" in p for p in check_integrity(df))
+
+
+def test_integrity_skips_work_checks_for_real_model_runs():
+    df = make_run([T, T, F, F], latencies_ms=[5, 5], run_id="steady|WAIT|EAGER|legacy|model")
+    assert check_integrity(df) == []
+
+
+def test_sleep_work_matches_runner_default():
+    from frametiming.run import RunConfig
+    assert SLEEP_WORK_MS == RunConfig.__dataclass_fields__["sleep_ms"].default

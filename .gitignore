@@ -16,3 +16,4 @@ docs/superpowers/
 .superpowers/
 .pytest_tmp/
 results/*.log
+.venv*/

@@ -70,6 +70,44 @@ def summarize(df: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+# ---------- integrity checks ----------
+
+SLEEP_WORK_MS = 40.0  # must match RunConfig.sleep_ms (a test checks this)
+CLOCK_SLACK_MS = 0.5
+
+
+def check_integrity(df: pd.DataFrame, sleep_work_ms: float = SLEEP_WORK_MS) -> list[str]:
+    """Physical sanity checks on the measurements. Returns problems found ([] = clean).
+
+    Sleep-mode runs do exactly `sleep_work_ms` of work per frame on one worker,
+    so no result can arrive sooner than that after its frame was sent, and no
+    two results can finish closer together than that. Breaking either rule
+    would mean the measurement itself is wrong.
+    """
+    problems = []
+    for run_id, run in df.groupby("run_id", sort=False):
+        idx = run.frame_idx.to_numpy()
+        missing = sorted(set(range(idx.max() + 1)) - set(idx)) if len(idx) else []
+        if missing or len(idx) != len(set(idx)):
+            problems.append(f"{run_id}: frames missing or duplicated ({missing[:5]}...)")
+        if run.emit_t.isna().any():
+            problems.append(f"{run_id}: {int(run.emit_t.isna().sum())} frames never sent by the camera")
+        done = run[run.processed]
+        if (done.latency_ms < 0).any():
+            problems.append(f"{run_id}: negative latency")
+        if run["mode"].iloc[0] != "sleep" or done.empty:
+            continue
+        floor = sleep_work_ms - CLOCK_SLACK_MS
+        if done.latency_ms.min() < floor:
+            problems.append(f"{run_id}: a result came back faster than the "
+                            f"{sleep_work_ms:.0f} ms of work ({done.latency_ms.min():.1f} ms)")
+        gaps_ms = np.diff(np.sort(done.done_t.to_numpy())) * 1000
+        if len(gaps_ms) and gaps_ms.min() < floor:
+            problems.append(f"{run_id}: two results finished only {gaps_ms.min():.1f} ms apart "
+                            f"(one worker needs {sleep_work_ms:.0f} ms each)")
+    return problems
+
+
 # ---------- charts ----------
 
 def _describe(run_id: str) -> str:
@@ -205,6 +243,10 @@ def main() -> None:
     out = Path(args.out_dir)
     plots = out / "plots"
     plots.mkdir(parents=True, exist_ok=True)
+
+    problems = check_integrity(df)
+    print("data checks: all passed" if not problems else
+          "DATA CHECKS FAILED:\n  " + "\n  ".join(problems))
 
     summary = summarize(df)
     summary.to_csv(out / "summary.csv", index=False)

@@ -80,9 +80,10 @@ def test_model_mode_requires_api_key(tiny_video, monkeypatch):
 
 def test_grid_has_every_combination():
     ids = {c.run_id for c in grid_configs(n_frames=60, include_model=True)}
-    # legacy grid + processing modes + every_frame with WAIT filling + model
-    assert len(ids) == 4 * 4 * 2 + 4 * 3 + 4 + 4
+    # legacy grid + processing modes + (every_frame, auto) with WAIT filling + model
+    assert len(ids) == 4 * 4 * 2 + 4 * 3 + 4 * 2 + 4
     assert "burst|WAIT|default|every_frame|sleep" in ids
+    assert "burst|WAIT|default|auto|sleep" in ids
 
 
 def test_grid_can_split_sleep_and_model():
