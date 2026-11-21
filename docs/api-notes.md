@@ -61,3 +61,14 @@ Roboflow wrote these to fix bursty real cameras (from the module docstring: came
 
 - `import inference` takes about 20–30 s on this machine, so each pytest run has a slow start.
 - `opencv-python`, `opencv-contrib-python` and `opencv-python-headless` are all installed by dependencies. `cv2` resolves to 4.11.0, which works.
+
+## Observed: `every_frame` alone still drops frames on a live source
+
+The processing mode only controls the *collection* step (it turns off the 0.5 s staleness budget). The camera's own *decoding buffer* still uses the live-stream default filling strategy, `ADAPTIVE_DROP_OLDEST`, which drops frames when it falls behind. Measured with 60 frames, 40 ms of work per frame, camera averaging 30 fps:
+
+| Schedule | `every_frame` + default filling | `every_frame` + `WAIT` filling |
+|---|---|---|
+| burst | 43.3% processed, median latency 172 ms | **100%** processed, median latency 466 ms |
+| jitter | 58.3% processed, median latency 77 ms | **100%** processed, median latency 371 ms |
+
+So, to really get every frame from a live source, pass **both** `video_processing_mode="every_frame"` and `source_buffer_filling_strategy=BufferFillingStrategy.WAIT`. The cost is latency that keeps growing while the model is slower than the camera.
