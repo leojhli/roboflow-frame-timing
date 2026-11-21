@@ -89,3 +89,21 @@ def test_grid_can_split_sleep_and_model():
     model_only = grid_configs(include_sleep=False, include_model=True)
     assert len(model_only) == 4 and all(c.mode == "model" for c in model_only)
     assert all(c.mode == "sleep" for c in grid_configs(include_model=False))
+
+
+def test_model_is_warmed_up_before_timing(monkeypatch):
+    # The first inferences of a model are slow (loading, optimizing). Those
+    # must happen BEFORE the experiment starts, not on the first real frames.
+    import inference
+    from frametiming.run import WARMUP_RUNS, _make_infer
+
+    class FakeModel:
+        calls = 0
+
+        def infer(self, image):
+            FakeModel.calls += 1
+
+    monkeypatch.setenv("ROBOFLOW_API_KEY", "fake-key-for-test")
+    monkeypatch.setattr(inference, "get_model", lambda **kw: FakeModel(), raising=False)
+    _make_infer(RunConfig("steady", "WAIT", "LAZY", mode="model"))
+    assert FakeModel.calls == WARMUP_RUNS >= 3

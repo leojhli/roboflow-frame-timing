@@ -32,6 +32,7 @@ from frametiming.stamp import read_index
 FILLINGS = ("WAIT", "DROP_OLDEST", "ADAPTIVE_DROP_OLDEST", "DROP_LATEST")
 CONSUMPTIONS = ("EAGER", "LAZY")
 PROCESSING_MODES = ("auto", "every_frame", "freshest")
+WARMUP_RUNS = 3  # untimed model inferences before each real-model run
 COLUMNS = ["run_id", "schedule", "filling", "consumption", "processing_mode", "mode",
            "frame_idx", "emit_t", "processed", "done_t", "latency_ms"]
 
@@ -69,6 +70,11 @@ def _make_infer(cfg: RunConfig):
             "environment variable (never put the key in code or files)")
     from inference import get_model
     model = get_model(model_id=cfg.model_id, api_key=api_key)
+    # Warm-up: a model's first few inferences are slow (memory allocation,
+    # runtime optimization). Run them now so they don't count as latency.
+    blank = np.zeros((360, 640, 3), dtype=np.uint8)
+    for _ in range(WARMUP_RUNS):
+        model.infer(blank)
     return lambda image: model.infer(image)
 
 
