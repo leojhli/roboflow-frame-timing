@@ -3,7 +3,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from frametiming.analyze import plot_strategy_grid, plot_timeline, summarize
+from frametiming.analyze import column_label, plot_strategy_grid, plot_timeline, summarize
 from frametiming.run import COLUMNS
 
 T, F = True, False
@@ -62,3 +62,10 @@ def test_plots_handle_all_dropped(tmp_path):
     plot_strategy_grid(summarize(df), tmp_path / "grid.png")
     assert (tmp_path / "timeline.png").stat().st_size > 0
     assert (tmp_path / "grid.png").stat().st_size > 0
+
+
+def test_column_label_separates_every_frame_variants():
+    plain = summarize(make_run([T], run_id="burst|default|default|every_frame|sleep")).iloc[0]
+    wait = summarize(make_run([T], run_id="burst|WAIT|default|every_frame|sleep")).iloc[0]
+    assert column_label(plain) != column_label(wait)
+    assert "WAIT" in column_label(wait)

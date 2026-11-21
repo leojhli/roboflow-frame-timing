@@ -119,11 +119,18 @@ def run_experiment(cfg: RunConfig) -> pd.DataFrame:
     return pd.DataFrame(rows, columns=COLUMNS)
 
 
-def grid_configs(n_frames: int = 300, include_model: bool = True) -> list[RunConfig]:
-    configs = [RunConfig(s, f, c, n_frames=n_frames)
-               for s in SCHEDULES for f in FILLINGS for c in CONSUMPTIONS]
-    configs += [RunConfig(s, "default", "default", processing_mode=m, n_frames=n_frames)
-                for s in SCHEDULES for m in PROCESSING_MODES]
+def grid_configs(n_frames: int = 300, include_model: bool = True,
+                 include_sleep: bool = True) -> list[RunConfig]:
+    configs = []
+    if include_sleep:
+        configs += [RunConfig(s, f, c, n_frames=n_frames)
+                    for s in SCHEDULES for f in FILLINGS for c in CONSUMPTIONS]
+        configs += [RunConfig(s, "default", "default", processing_mode=m, n_frames=n_frames)
+                    for s in SCHEDULES for m in PROCESSING_MODES]
+        # every_frame alone still drops on live sources; WAIT filling is what
+        # actually keeps every frame (see docs/api-notes.md).
+        configs += [RunConfig(s, "WAIT", "default", processing_mode="every_frame", n_frames=n_frames)
+                    for s in SCHEDULES]
     if include_model:
         configs += [RunConfig(s, "ADAPTIVE_DROP_OLDEST", "EAGER", mode="model", n_frames=n_frames)
                     for s in SCHEDULES]
@@ -134,6 +141,8 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--grid", action="store_true", help="run every combination")
     parser.add_argument("--quick", action="store_true", help="60 frames per run instead of 300")
+    parser.add_argument("--only", choices=["sleep", "model"],
+                        help="run only the sleep-mode or only the real-model part of the grid")
     parser.add_argument("--out", default="results/runs.csv")
     args = parser.parse_args()
     if not args.grid:
@@ -141,9 +150,14 @@ def main() -> None:
 
     logging.getLogger("inference").setLevel(logging.WARNING)
     has_key = bool(os.environ.get("ROBOFLOW_API_KEY"))
-    if not has_key:
+    want_model = args.only != "sleep"
+    if want_model and not has_key:
+        if args.only == "model":
+            parser.error("--only model needs the ROBOFLOW_API_KEY environment variable")
         print("ROBOFLOW_API_KEY not set: skipping the real-model runs.")
-    configs = grid_configs(n_frames=60 if args.quick else 300, include_model=has_key)
+    configs = grid_configs(n_frames=60 if args.quick else 300,
+                           include_model=want_model and has_key,
+                           include_sleep=args.only != "model")
 
     results = []
     for n, cfg in enumerate(configs, 1):

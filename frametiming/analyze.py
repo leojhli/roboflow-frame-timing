@@ -123,9 +123,11 @@ FILLING_LABEL = {"WAIT": "WAIT", "DROP_OLDEST": "DROP_\nOLDEST",
 MODE_ORDER = ["auto", "every_frame", "freshest"]
 
 
-def _column_label(row) -> str:
+def column_label(row) -> str:
+    """Short heatmap column name for one run's settings."""
     if row.processing_mode != "legacy":
-        return f"mode=\n{row.processing_mode}"
+        extra = "" if row.filling == "default" else f"\n+ {row.filling}"
+        return f"mode=\n{row.processing_mode}{extra}"
     return f"{FILLING_LABEL.get(row.filling, row.filling)}\n+ {row.consumption}"
 
 
@@ -136,7 +138,7 @@ def _order(items: list, item) -> int:
 def _column_key(row) -> tuple:
     """Sort columns: legacy settings first (by filling, EAGER before LAZY), then modes."""
     if row.processing_mode != "legacy":
-        return (1, _order(MODE_ORDER, row.processing_mode), 0)
+        return (1, _order(MODE_ORDER, row.processing_mode), 0 if row.filling == "default" else 1)
     return (0, _order(FILLING_ORDER, row.filling), _order(["EAGER", "LAZY"], row.consumption))
 
 
@@ -151,7 +153,7 @@ METRIC_TITLES = {
 def plot_strategy_grid(summary: pd.DataFrame, path, metric: str = "delivered_pct") -> None:
     """Heatmap: camera schedule (rows) x buffer settings (columns)."""
     s = summary[summary["mode"] == "sleep"] if (summary["mode"] == "sleep").any() else summary
-    s = s.assign(col=[_column_label(r) for r in s.itertuples()],
+    s = s.assign(col=[column_label(r) for r in s.itertuples()],
                  key=[_column_key(r) for r in s.itertuples()])
     cols = list(dict.fromkeys(s.sort_values("key").col))
     rows = [r for r in SCHEDULE_ORDER if r in set(s.schedule)] or sorted(set(s.schedule))
@@ -194,11 +196,12 @@ def _slug(run_id: str) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("runs_csv", nargs="?", default="results/runs.csv")
+    parser.add_argument("runs_csv", nargs="*", default=["results/runs.csv"],
+                        help="one or more CSVs from frametiming.run (they are combined)")
     parser.add_argument("--out-dir", default="results")
     args = parser.parse_args()
 
-    df = pd.read_csv(args.runs_csv)
+    df = pd.concat([pd.read_csv(p) for p in args.runs_csv], ignore_index=True)
     out = Path(args.out_dir)
     plots = out / "plots"
     plots.mkdir(parents=True, exist_ok=True)
