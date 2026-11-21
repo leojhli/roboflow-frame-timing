@@ -113,3 +113,30 @@ def test_integrity_skips_work_checks_for_real_model_runs():
 def test_sleep_work_matches_runner_default():
     from frametiming.run import RunConfig
     assert SLEEP_WORK_MS == RunConfig.__dataclass_fields__["sleep_ms"].default
+
+
+def test_integrity_flags_machine_pause():
+    # One result arrives 2 s later than the free worker could have produced it:
+    # the whole process was frozen (e.g. the laptop went to sleep mid-run).
+    df = clean_run()
+    row = df.frame_idx == 8
+    df.loc[row, "done_t"] = df.loc[row, "emit_t"] + 2.05
+    df.loc[row, "latency_ms"] = 2050.0
+    assert any("paused" in p for p in check_integrity(df))
+
+
+def test_integrity_flags_machine_pause_in_model_runs():
+    df = make_run([T, F] * 5, latencies_ms=[900.0] * 5, run_id="steady|WAIT|EAGER|legacy|model")
+    assert check_integrity(df) == []  # slow but steady model: fine
+    row = df.frame_idx == 8
+    df.loc[row, "done_t"] = df.loc[row, "emit_t"] + 30.0
+    df.loc[row, "latency_ms"] = 30_000.0
+    assert any("paused" in p for p in check_integrity(df))
+
+
+def test_run_title_names_every_setting():
+    from frametiming.analyze import describe_run
+    plain = describe_run("burst|default|default|auto|sleep")
+    wait = describe_run("burst|WAIT|default|auto|sleep")
+    assert plain != wait and "WAIT" in wait
+    assert "YOLOv8n" in describe_run("steady|ADAPTIVE_DROP_OLDEST|EAGER|legacy|model")

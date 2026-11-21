@@ -1,5 +1,10 @@
-"""Minimal reproduction: on a LIVE source, video_processing_mode="every_frame"
-still drops frames unless the buffer filling strategy is also WAIT.
+"""Minimal reproduction: on a LIVE source, the 1.8 processing modes keep the
+source's default ADAPTIVE_DROP_OLDEST buffer, which drops frames before the
+mode ever sees them:
+  * video_processing_mode="every_frame" still drops frames unless the buffer
+    filling strategy is also WAIT;
+  * video_processing_mode="auto" processes far fewer frames than the model
+    could handle, unless the buffer filling strategy is also WAIT.
 
 Self-contained, needs only:  pip install inference
 Run:                         python repro/every_frame_drops.py
@@ -65,14 +70,15 @@ def frames_processed(**pipeline_kwargs) -> int:
 
 
 if __name__ == "__main__":
+    wait = dict(source_buffer_filling_strategy=BufferFillingStrategy.WAIT)
     cases = {
-        'video_processing_mode="every_frame"':
-            dict(video_processing_mode="every_frame"),
-        'video_processing_mode="every_frame" + source_buffer_filling_strategy=WAIT':
-            dict(video_processing_mode="every_frame",
-                 source_buffer_filling_strategy=BufferFillingStrategy.WAIT),
+        '"every_frame"': dict(video_processing_mode="every_frame"),
+        '"every_frame" + filling=WAIT': dict(video_processing_mode="every_frame", **wait),
+        '"auto"': dict(video_processing_mode="auto"),
+        '"auto" + filling=WAIT': dict(video_processing_mode="auto", **wait),
     }
-    print(f"inference {version('inference')}: {N_FRAMES} frames sent per run, {REPEATS} runs each")
+    print(f"inference {version('inference')}: {N_FRAMES} frames sent per run, {REPEATS} runs each, "
+          f"model capacity ~{100 * (1 / WORK_S) / FPS:.0f}% of frames")
     for label, kwargs in cases.items():
         counts = [frames_processed(**kwargs) for _ in range(REPEATS)]
-        print(f"  {label:75s} processed {counts} of {N_FRAMES}")
+        print(f"  video_processing_mode={label:32s} processed {counts} of {N_FRAMES}")

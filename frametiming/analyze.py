@@ -74,6 +74,21 @@ def summarize(df: pd.DataFrame) -> pd.DataFrame:
 
 SLEEP_WORK_MS = 40.0  # must match RunConfig.sleep_ms (a test checks this)
 CLOCK_SLACK_MS = 0.5
+# Longest a result may arrive after the worker was free and its frame existed.
+# Normal runs: <= ~180 ms (pipeline collection windows). Real models get more
+# room because their speed varies. Anything above means the process froze.
+MAX_UNEXPLAINED_WAIT_MS = {"sleep": 1_000.0, "model": 5_000.0}
+
+
+def _longest_unexplained_wait_ms(done: pd.DataFrame, work_ms: float) -> float:
+    """Longest delay not explained by work: each result can start once the worker
+    is free AND its frame has arrived, then needs `work_ms`."""
+    d = done.sort_values("done_t")
+    t_done, t_emit = d.done_t.to_numpy(), d.emit_t.to_numpy()
+    if len(t_done) < 2:
+        return 0.0
+    waits = (t_done[1:] - np.maximum(t_done[:-1], t_emit[1:])) * 1000 - work_ms
+    return float(waits.max())
 
 
 def check_integrity(df: pd.DataFrame, sleep_work_ms: float = SLEEP_WORK_MS) -> list[str]:
@@ -95,7 +110,12 @@ def check_integrity(df: pd.DataFrame, sleep_work_ms: float = SLEEP_WORK_MS) -> l
         done = run[run.processed]
         if (done.latency_ms < 0).any():
             problems.append(f"{run_id}: negative latency")
-        if run["mode"].iloc[0] != "sleep" or done.empty:
+        mode = run["mode"].iloc[0]
+        pause_ms = _longest_unexplained_wait_ms(done, SLEEP_WORK_MS if mode == "sleep" else 0.0)
+        if pause_ms > MAX_UNEXPLAINED_WAIT_MS.get(mode, 5_000.0):
+            problems.append(f"{run_id}: the process paused for {pause_ms / 1000:.1f} s mid-run "
+                            "(did the computer sleep?) - re-run it")
+        if mode != "sleep" or done.empty:
             continue
         floor = sleep_work_ms - CLOCK_SLACK_MS
         if done.latency_ms.min() < floor:
@@ -110,10 +130,14 @@ def check_integrity(df: pd.DataFrame, sleep_work_ms: float = SLEEP_WORK_MS) -> l
 
 # ---------- charts ----------
 
-def _describe(run_id: str) -> str:
+def describe_run(run_id: str) -> str:
+    """Human-readable chart title for one run, naming every setting that differs."""
     schedule, filling, consumption, processing_mode, mode = run_id.split("|")
-    how = (f"video_processing_mode={processing_mode}" if processing_mode != "legacy"
-           else f"filling={filling}, consumption={consumption}")
+    if processing_mode != "legacy":
+        how = f"video_processing_mode={processing_mode}"
+        how += "" if filling == "default" else f" + filling={filling}"
+    else:
+        how = f"filling={filling}, consumption={consumption}"
     work = "YOLOv8n model" if mode == "model" else "fixed 40 ms work per frame"
     return f"{schedule} camera · {how} · {work}"
 
@@ -149,7 +173,7 @@ def plot_timeline(run: pd.DataFrame, path) -> None:
     bottom.set_axisbelow(True)
 
     pct = 100 * run.processed.mean()
-    fig.suptitle(_describe(run.run_id.iloc[0]), x=0.06, ha="left", fontsize=11, color=INK)
+    fig.suptitle(describe_run(run.run_id.iloc[0]), x=0.06, ha="left", fontsize=11, color=INK)
     fig.text(0.06, 0.905, f"{pct:.0f}% of frames processed", color=INK_2, fontsize=9)
     fig.subplots_adjust(left=0.1, right=0.97, top=0.8, bottom=0.12, hspace=0.12)
     fig.savefig(path, dpi=150)
