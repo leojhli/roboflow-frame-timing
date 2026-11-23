@@ -128,7 +128,12 @@ Latency stays within about one inference time of the frame arriving. Because thi
 
 ## What I'd tell the Inference team
 
-<!-- Leo: write this section in your own words (see docs/findings.md). -->
+1. **Let the processing mode own dropping.** When `video_processing_mode` is set and the user hasn't chosen a filling strategy, I'd default the live source buffer to `WAIT` instead of `ADAPTIVE_DROP_OLDEST`. Right now two layers both drop frames, and the one the user configured is the one that sees the fewest of them. With `WAIT` underneath, `auto` gets close to the model's real capacity and `every_frame` matches its name.
+2. **If the default can't change, say so.** The `every_frame` docs should state that a live source also needs `source_buffer_filling_strategy=WAIT`, or the pipeline could log a warning when `every_frame` is combined with a dropping buffer. Someone choosing "every frame" is telling you they can't afford to lose any.
+3. **Count every drop in one place.** Frames thrown away by the source buffer never reach the mode, so they don't show up wherever the mode reports its own drops. A single "frames sent vs. frames processed" count per source would have made this problem visible without a custom harness.
+4. **Benchmark for longer than a few seconds.** Adaptive dropping changes behavior partway through a run (burst + `auto`: 48% processed in the first 5 s, 10% in the next 5 s), so short tests can mislead in either direction.
+
+One thing I couldn't test: on a real RTSP camera, `WAIT` means the reading thread blocks while the buffer is full, and I don't know how that interacts with the network stream if the model falls far behind. That's the first thing I'd check before changing a default. The [repro script](repro/processing_mode_drops.py) is small enough to adapt into a regression test, and I'm happy to open an issue or PR with it.
 
 ## Limitations
 
